@@ -1,0 +1,263 @@
+---
+title: "Homework 04: Use split-apply-combine with your functions within data.frames"
+author: "Shenyi Pan"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE)
+```
+
+##Goal of this homework
+
+* Write custom functions that do something useful to pieces of the Gapminder data
+* Use `dplyr::do()` to apply to all such pieces
+* Use `dplyr()` and `ggplot2` to explore the results
+
+##Workflow
+
+###Load data and packages
+First, we need to load the gapminder data, as well as the `dplyr`, `ggplot2`, and `knitr` packages.
+
+```{r}
+library(gapminder)
+suppressPackageStartupMessages(library(dplyr))
+library(ggplot2)
+library(knitr)
+```
+
+###Elementary analysis on life expectancy
+
+In this homework, we will explore the relationship between life expectancy and time, that is, how the life expectancy of a certain country changes with time. First, we will plot the expectancy against time in order to check the general trend.
+
+
+```{r initial_lineplot}
+ggplot(aes(x = year, y = lifeExp, color = country), data = gapminder) + geom_line() +  facet_wrap(~continent) + theme(legend.position="none")
+```
+
+From the plot above, it can be seen that for most countries, the life expectancy changes linearly with years. Therefore, a linear regression model might be a suitable choice for most of the countries we have. However, it is also noticeable that there are a few countries with drastic and irregular change patterns over years. For those countries, if we simply fit a linear regression model, it will lead to large residuals. Thus, we may consider those countries with large regression residuals as potential countries with interesting stories.
+
+We will first fit a linear regression model to one specific country as a trial experiment.
+
+```{r initial_indo}
+sampleCountry <- "Indonesia"
+indoDat <- gapminder %>% filter(country == sampleCountry)
+kable(indoDat, format="markdown")
+ggplot(indoDat, aes(x = year, y = lifeExp)) + geom_point() + geom_smooth(method = "lm", se = FALSE)
+```
+
+So we can see that the linear regression model works well for the Indonesia data.
+
+###Writing the function
+
+In this part, we will write some functions to analyze the life expectancy data. First of all, we will write the function to fit a linear regression model to life expectancy versus year. 
+
+Before writing the function, we should first determine what values to return with this function. Ideally, this function should return the following values:
+
+- Coefficient for the intercept as well as the slope in the fitted regression model;
+- The maximum of the absolute value of the regression residual, as well as the year that largest residual corresponds to;
+- Coefficient of determination, which is a measure of whether the fitted regression model is good or not.
+
+At the beginning of the function, we would also wish to check whether we are receiving a dame frame. If it is not the case, we will terminate the function. Bearing these thoughts in mind, we will write the function as follows:
+
+```{r}
+linearModel <- function (dat, offset = 1952){
+  #make sure that we are receiving a dame frame
+  stopifnot(is.data.frame(dat))
+  #fit a linear regression model
+  linMod <- lm(lifeExp ~ I(year - offset), data = dat)
+  #find the maximum absolute residual
+  maxRes <-  max(abs(linMod$residuals))
+  #find which year that residual corresponds to
+  maxResYear <- offset - 5 + 5*which.max(abs(linMod$residuals))
+  #store the coefficient of determination
+  R2 <- summary(linMod)$r.squared
+  returnDat <- c(linMod$coef, maxRes, maxResYear, R2)
+  return(setNames(data.frame(t(returnDat)), c("intercept", "slope", "max.abs.res", "res.year", "coef.of.det")))
+}
+```
+
+The returned value `max.abs.res`, `res.year`, and `coef.of.det` represents the maximum of the absolute value of the regression residual, the year that largest residual occurs, and the coefficient of determination respectively. Let us try the function on the Indonesia data.
+
+```{r}
+linearModel(indoDat)
+```
+
+So we can see that the function indeed works for the Indonesia data.
+
+Apart from the ordinary least squares linear regression model, we may also wish to fit a robust regression model. Similarly, we can write another function for the robust regression case.
+
+```{r}
+robustModel <- function (dat, offset = 1952){
+  #make sure that we are receiving a dame frame
+  stopifnot(is.data.frame(dat))
+  #fit a robust regression model
+  robMod <- robMod <- lmrob(lifeExp ~ I(year - offset), data = dat)
+  #find the maximum absolute residual
+  maxRes <-  max(abs(robMod$residuals))
+  #find which year that residual corresponds to
+  maxResYear <- offset - 5 + 5*which.max(abs(robMod$residuals))
+  #store the coefficient of determination
+  R2 <- summary(robMod)$r.squared
+  returnDat <- c(robMod$coef, maxRes, maxResYear, R2)
+  return(setNames(data.frame(t(returnDat)), c("intercept", "slope", "max.abs.res", "res.year", "coef.of.det")))
+}
+```
+
+```{r}
+library(robustbase)
+robustModel(indoDat)
+```
+
+So we can see that the function works for the Indonesia data as well.
+
+Next we will write a function that gives both the regression coefficient estimate from both regression models, as well as the difference between the estimated parameters under these two approaches.
+
+```{r}
+modelDiff <- function (dat, offset = 1952){
+  #make sure that we are receiving a dame frame
+  stopifnot(is.data.frame(dat))
+  #fit a linear regression model
+  linMod <- lm(lifeExp ~ I(year - offset), data = dat)
+  #fit a robust regression model
+  robMod <- lmrob(lifeExp ~ I(year - offset), data = dat)
+  returnDat <- c(linMod$coef, robMod$coef, robMod$coef-linMod$coef)
+  return(setNames(data.frame(t(returnDat)), c("lm.intercept", "lm.slope", "rob.intercept", "rob.slope", "intercept.change", "slope.change")))
+}
+```
+
+The returned value `intercept.change`, `slope.change` stands for the change of the estimated intercept and slope respectively compared with linear regression model when we switch from linear regression to robust regression model. Let us try the function on the Indonesia data.
+
+```{r}
+modelDiff(indoDat)
+```
+
+So again we can see that the function works for the Indonesia data. We can also notice that the discrepancy of the estimated regression coefficients between the two regression approaches is very small. So there is actually no significant differences between the two methods for the Indonesia data.
+
+###Applying the function to the gapminder dataset
+
+After writing the functions, we will apply them to all countries in the gapminder dataset by placing the function inside a `dplyr::do()` call. First we will apply the function `linearModel()` that we write in the previous section. 15 random rows of the result table will be shown below.
+
+```{r}
+lmFitResult <- gapminder %>%
+  group_by(continent, country) %>% 
+  do(linearModel(.)) %>%
+  ungroup()
+set.seed(13)
+kable(lmFitResult[sample(nrow(lmFitResult), 15), ], format="markdown")
+#Calculate the proportion of countries with coefficient of determination greater than 0.6
+lmFitResult %>% filter(coef.of.det > .6) %>% nrow() / nrow(lmFitResult)
+```
+
+For most countries, we can see that around 90% of the countries have a regression coefficient pf determination greater than 0.6, which indicates that the simple linear regression model works well for most of the countries. This is also shown by the plot of the density of the regression R^2 we get. However, there are also some countries where the fitted linear regression model does not work so well. Therefore, we get a very long left tail in the density plot.
+
+```{r lm_r^2_density}
+ggplot(lmFitResult, aes(x = coef.of.det)) + geom_density() + geom_rug()
+```
+
+Likewise, we can make a plot of the maximum absolute residual we get from all the regression models. Again, for most countries, the maximum absolute residual is not so extreme. However, there are indeed countries with very large residuals, which indicates that for those countries the linear regression model does not perform that well.
+
+```{r lm_maxres_density}
+ggplot(lmFitResult, aes(x = max.abs.res)) + geom_density() + geom_rug()
+```
+
+We can also make a plot to check the relationship between slope and intercept estimates from the regression model. From the plot, it can be seen that generally slope and intercept are negatively correlated. We know that the intercept stands for the life expectancy in the year 1952, while the slope stands for the change of life expectancy when year increases by 1. So the result makes sense since if a country already has a high life expectanct in 1952, it will have less room to improve over the following years than those with a low start.
+
+```{r lm_int_slope, message=FALSE}
+ggplot(lmFitResult, aes(x = intercept, y = slope)) + geom_point() + geom_smooth(se = FALSE)
+```
+
+We can also apply the function `robustModel()` that we write to check whether anything changes.
+
+```{r warning=F}
+robFitResult <- gapminder %>%
+  group_by(continent, country) %>% 
+  do(robustModel(.)) %>%
+  ungroup()
+set.seed(13)
+kable(robFitResult[sample(nrow(robFitResult), 15), ], format="markdown")
+#Calculate the proportion of countries with coefficient of determination greater than 0.6
+robFitResult %>% filter(coef.of.det > .6) %>% nrow() / nrow(robFitResult)
+```
+
+So after we fit a robust regression model, over 96% of the countries have a regression coefficient pf determination greater than 0.6, which performs even better than the linear regression case. We will also make the density plot for the coefficient of regression we obtained via robust regression.
+
+```{r rob_r^2_density}
+ggplot(robFitResult, aes(x = coef.of.det)) + geom_density() + geom_rug()
+```
+
+As is seen from the density plot above, robust regression significantly reduces the number of cases where extreme low coefficient of determination occurs. The entire ditribution of R^2 under robust regression is more concentrated to the right.
+
+So in the next part, we will take a further look at the ten worst models suggested based on the coefficient of determination in linear regression model, and check whether fitting a robust regression model improves the performance.
+
+```{r}
+badFit <- lmFitResult %>% arrange(coef.of.det)
+kable(head(badFit,10), format="markdown")
+```
+
+Surprisingly, all the countries with the ten worst fitted models come from the same continent - Africa. So whether these ten countries also have the largest absolute residuals recorded?
+
+```{r}
+largeResFit <- lmFitResult %>% arrange(desc(max.abs.res))
+kable(head(largeResFit,10), format="markdown")
+```
+
+Again, most countries come from Africa (these countries also appear in the worst model fit list), expect Combodia and China. Therefore, we will select two among all these countries - Rwanda and Cambodia to conduct some further analysis.
+
+####Analysis on Rwanda
+
+Let us take a look at the linear regression result for Rwanda again.
+```{r lm_rwa}
+RwaDat <- gapminder %>% filter(country == "Rwanda")
+(linearModel(RwaDat))
+ggplot(RwaDat, aes(x = year, y = lifeExp)) + geom_point() + geom_smooth(method = "lm", se = FALSE)
+```
+
+We can see that the fitted regression model is very bad for Rawanda. The slope is even negative although for most of the years the life expectancy in Rwanda is actually increasing. Such result may be attributed to the drastic life expectancy decrease during the period of [Rwandan Civil War](https://en.wikipedia.org/wiki/Rwandan_Civil_War) and [Rwandan Genocide](https://en.wikipedia.org/wiki/Rwandan_Genocide). Therefore, we may wish to instead fit a robust model to see whether the fit could be better.
+
+```{r rob_rwa}
+(robustModel(RwaDat))
+modelDiff(RwaDat)
+ggplot(RwaDat, aes(x = year, y = lifeExp)) + geom_point() + geom_abline(intercept=modelDiff(RwaDat)$rob.intercept-modelDiff(RwaDat)$rob.slope*1952, slope=modelDiff(RwaDat)$rob.slope, color = "red")
+```
+
+After fitting a robust regression model, we can see that the slope changes from negative to positive, which captures the overall trend of the life expectancy change in Rwanda a little bit better. However, since generally Rwanda's data does not quite follow a linear pattern, perhaps we should instead fit a smooth spline interpolation model to the data.
+
+```{r spline_rwa}
+RwaSpline <- smooth.spline(RwaDat$year, RwaDat$lifeExp)
+plot(RwaDat$lifeExp~RwaDat$year, main = "Rwanda life expectancy versus year spline")
+lines(RwaSpline, col = "pink")
+```
+
+So from the plot above, we can actually see that the spline method fits the data better in Rwanda case than both linear and robust regression models.
+
+####Analysis on Combodia
+
+Then let us take a look at the regression result for Cambodia.
+```{r lm_cam}
+CbdDat <- gapminder %>% filter(country == "Cambodia")
+(linearModel(CbdDat))
+ggplot(CbdDat, aes(x = year, y = lifeExp)) + geom_point() + geom_smooth(method = "lm", se = FALSE)
+```
+
+From the plot above, it can be seen that generally the life expectancy change over time in Cambodia follows a linear pattern. However, there are two obvious outliers in the year 1972 and 1977 (which may be attributed to the reign of [Khmer Rouge](https://en.wikipedia.org/wiki/Khmer_Rouge) in Cambodia in the 1970s). As a result, the regression line given by linear regression lies below most of the points and does not capture the general trend of change well. The coefficient of determination from linear regression is 0.6386922, which is not a very satisfactory result.
+
+So let us try to fit a robust regression model instead, and see what will happen.
+
+```{r rob_cam}
+(robustModel(CbdDat))
+modelDiff(CbdDat)
+ggplot(CbdDat, aes(x = year, y = lifeExp)) + geom_point() + geom_abline(intercept=modelDiff(CbdDat)$rob.intercept-modelDiff(CbdDat)$rob.slope*1952, slope=modelDiff(CbdDat)$rob.slope, color = "red")
+```
+
+After fitting the robust regression model, the intercept term changes quite much. Therefore, the regression line under robust regression method excludes the effect of the two outliers and fits most of the data point much better. Also, the R^2 from robust regression is 0.9872671, which significantly outperforms the linear regression method. Therefore, we may conclude that robust regression might be a more suitable model to analyze the Cambodia data.
+
+##Summary
+
+In this homework, we developed three functions to fit a linear or robust regression mode to the life expectancy data of a certain country, and to compare the difference between these two regression methods. Generally, for most countries, life expectancy and year are linearly correlated. Therefore, linear model usually performs well with the gapminder dataset. But fitting robust regression model will generally further improve the performance. The reason is that for countries, there are some extreme values or outliers within the dataset. Under such circumstance, fitting a robust regression model will be more suitable to describe the trend of the data.
+
+##Process report
+
+One of the difficulties I encountered in this homework occurs when I try to fit a smooth spline model to the Rwanda life expectancy data. I searched the Internet to seek a way to plot the spline obtained from `smooth.spline()` with `ggplot2` package, but the tips online did not seem to work. So I still used the default plot function in R to generate that paticular plot.

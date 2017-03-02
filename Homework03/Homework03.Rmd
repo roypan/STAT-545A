@@ -1,0 +1,149 @@
+---
+title: "Homework 03: Use dplyr to manipulate and explore data (also use ggplot2)"
+author: "Shenyi Pan"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE)
+```
+
+##Goal of this homework
+
+* Manipulate and explore a dataset with the `dplyr` package.
+* Continue to make plots with the package `ggplot2`.
+* Learn how to author a dynamic report in R Markdown and share it on the web.
+
+##Workflow
+
+###Load data and packages
+First, we need to load the gapminder data, as well as the `dplyr`, `ggplot2`, and `knitr` packages.
+
+```{r}
+library(gapminder)
+suppressPackageStartupMessages(library(dplyr))
+library(ggplot2)
+library(knitr)
+```
+
+###Tasks
+
+####1. Get the maximum and minimum of GDP per capita for all continents
+We will group the gapminder dataset by continent, and then summarize it to obtain the minimum and the maximum of gdpPercap for each continent. The error bar plot shows these maximum and minimum values.
+```{r percap_min_max}
+minMaxGdpPercap <- gapminder %>% group_by(continent) %>% 
+  summarize(min_gdpPercap = min(gdpPercap), max_gdpPercap = max(gdpPercap))
+kable(minMaxGdpPercap, format="markdown")
+ggplot(minMaxGdpPercap) + 
+  geom_errorbar(aes(x=continent, ymin=min_gdpPercap, ymax=max_gdpPercap, color=continent, width=.5)) + scale_y_log10() + ylab("gdpPercap")
+```
+
+From the figure, we can see that most continents, the difference between the maximum GDP per capita and minimum GDP per capita is quite large. Oceania has the smallest difference perhaps due to the few number of observations we have.
+
+####2. Look at the spread of GDP per capita within the continents
+We will group the gapminder dataset by continent, and then summarize it to obtain the interquantile range, standard deviation, minimum, median, as well as maximum for each continent. We can use box plot to visualize all the information.
+
+```{r percap_spread}
+spreadGdpPercap <- gapminder %>% group_by(continent) %>% 
+  summarize(IQR = IQR(gdpPercap), sd = sd(gdpPercap), min = min(gdpPercap), median = median(gdpPercap), max = max(gdpPercap))
+kable(spreadGdpPercap, format="markdown")
+ggplot(gapminder) + geom_boxplot(aes(x=continent, y=gdpPercap, color=continent)) + scale_y_log10()
+```
+
+From the box plot above, we can see that the distribution of GDP per capita of Asia and Africa has larger spread than the other three continents. The distribution of most continents are skewed to the right except Europe.
+
+####3. Compute a weighted mean of life expectancy by population for different years
+We will group the gapminder dataset by different years, and then summarize it to obtain the weighted mean of lifeExp by population. Then we can use a line plot to visualize the change of weighted mean of lifeExp over time.
+```{r lifeExp_weighted}
+weightedMean <- gapminder %>% group_by(year) %>% 
+  summarize(weightedMean = sum(lifeExp*pop)/(sum(pop)))
+kable(weightedMean, format="markdown")
+ggplot(weightedMean) + geom_line(aes(x=year, y=weightedMean)) + geom_point(aes(x=year, y=weightedMean))
+```
+
+From the above line plot, we can see that the genral trend of weighted mean of life expectancy by population is increasing with years.
+
+####4. How is life expectancy changing over time on different continents?
+We will group the gapminder dataset by both continents and years. And then use line plot to examine how the weighted average of lifeExp changes over time acress different continents. Since the result table has quite a few rows, we will only show the first few rows here.
+```{r lifeExp_change}
+lifeExpOverTime <- gapminder %>% group_by(continent, year) %>% 
+  summarize(weightedMean = sum(lifeExp*pop)/(sum(pop)))  
+kable(head(lifeExpOverTime), format="markdown")
+ggplot(lifeExpOverTime) + geom_line(aes(x=year, y=weightedMean, color=continent)) + 
+  geom_point(aes(x=year, y=weightedMean, color=continent)) 
+```
+
+From the above line plot, we can see that for all continents, the genral trend of weighted mean of life expectancy by population is increasing with years. However, after 1992, the life expectancy of Africa tends to increase at a lower speed than other continents.
+
+####5. Report the absolute abundance of countries with low life expectancy over time by continent
+*Compute some measure of worldwide life expectancy – you decide – a mean or median or some other quantile or perhaps your current age. Then determine how many countries on each continent have a life expectancy less than this benchmark, for each year.*
+
+To answer this question, first we have to find a benchmark for lifeExp. We will use the lower 25% quantile for global lifeExp in certain year as the benchmark for that year. After finding the benchmark, we will find the number of the countries that fall below the benchmark each year.
+
+Since the result table reporting the absolute abundance of countries with low life expectancy over time by continent has quite a few rows, we will only show the first few rows here.
+
+```{r low_lifeExp}
+lifeExpBenchmark <- gapminder %>% group_by(year) %>% 
+  summarize(benchmark = quantile(lifeExp, .25))
+kable(lifeExpBenchmark, format="markdown")
+gapminder2 <- gapminder %>% mutate(benchmark = rep(lifeExpBenchmark$benchmark, nlevels(country)))
+noBelowBenchmark <- gapminder2 %>% 
+  group_by(continent, year) %>% summarize(noBelowBenchmark = sum(benchmark > lifeExp))
+kable(head(noBelowBenchmark, 12), format="markdown")
+ggplot(noBelowBenchmark) + geom_line(aes(x=year, y=noBelowBenchmark, color=continent)) + 
+  geom_point(aes(x=year, y=noBelowBenchmark, color=continent))
+```
+
+From the line plot above, we can see that Africa has the most countries with low life expectancy, and the number of countries with low life expectancy in Africa even has a tendency to increase during recent years.
+
+####6. Find countries with interesting stories
+
+We will take a look at the the plot of the change of GDP per capita over different years,
+
+```{r percap_global}
+ggplot(gapminder) + geom_line(aes(x = year, y = gdpPercap, group = country, color = continent))
+```
+
+From the plot above, we can see that there is a country with extremely high GDP per capita in 1950s, but then its GDP per capita rapidly droppoed in the next few decades. So who is that country?
+
+```{r}
+gapminder %>% filter(year == min(year)) %>% select(country, year, gdpPercap) %>%
+  arrange(desc(gdpPercap)) %>% head(10) %>% kable(format="markdown")
+```
+
+That country seems to be Kuwait. We will use another line plot to show the contrast of the change in GDP per capita between Kuwait and other countries.
+
+```{r percap_kuwait}
+ggplot(data = filter(gapminder, country != "Kuwait")) + 
+  geom_line(aes(x = year, y = gdpPercap, group = country), color="grey") + 
+  geom_line(data = filter(gapminder, country == "Kuwait"), color = "blue", aes(x = year, y = gdpPercap))
+```
+
+So from the plot we can see the GDP per capita of Kuwait rapidly decreased after 1972, but still ranked as one of the hight GDP per capita around the world.
+
+####7. Make up your own!
+
+In this section, we will examine which country is the largest economy and which country is the smallest economy in Asia over years.
+
+```{r}
+gdpInAsia <- gapminder %>% mutate(gdp = pop * gdpPercap) %>% 
+  filter(continent == 'Asia') %>% arrange(year) %>% group_by(year) %>% 
+  mutate(gdp_rank = min_rank(gdp), gdp_desc_rank = min_rank(desc(gdp))) %>% 
+  filter(min_rank(desc(gdp)) < 2 | min_rank(gdp) < 2) %>% 
+  select(country, year, pop, gdpPercap, gdp, gdp_desc_rank)
+kable(gdpInAsia, format="markdown")
+```
+
+From the above table, we can see that Mongolia has been the smallest economy in Asia for all the selected years. Meanwhile, Japan was Asia's largest economy until the year 1997, which was exceeded by China in 2002. The change of total GDP over years for these three counrties can be found below.
+
+```{r asia_economy}
+ggplot(gapminder %>% mutate(gdp = pop * gdpPercap) %>% filter(country == "China" | country == "Japan" | country == "Mongolia")) + 
+  geom_line(aes(x = year, y = gdp, color = country)) + geom_point(aes(x = year, y = gdp, color = country))
+```
+
+##Process report
+This is the first time I use the package `dplyr`. So this homework helps me to have a better idea about how this package works. 
+
+Also, I was trying to use the sharing on [Stack Overflow](http://stackoverflow.com/questions/19237190/2-column-report-in-r-markdown-render-html-aside-data-frame) to get the table and figure side-by-side. It worked perfectly on my laptop when I clicked on "Knit HTML". But when I uploaded the md file to github, it could not display the tables and figures correctly. So I still use the plain way to display the figures as well as tables.
