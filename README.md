@@ -15,9 +15,6 @@ I am a first year master student majoring in Statistics. I come from mainland Ch
 ## Process report of Homework 01
 The Github repository was first cloned to RStudio on my laptap. After that, all changes in README.md were made in RStudio, and then were committed and pushed to Github server.
 
-## Contact
-If you have any comments on this repository, please contact me via [Facebok](https://www.facebook.com/roy.pan.96), [Twitter](https://twitter.com/orientpsy), or [GitHub](https://github.com/roypan).
-
 ## Useful Links
 - [STAT 545 Homepage](http://stat545-ubc.github.io/)
 - [STAT 545 Twitter](https://twitter.com/STAT545)
